@@ -3,9 +3,9 @@ use base64::{engine::general_purpose::STANDARD, Engine};
 use reqwest::header::AUTHORIZATION;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use serde_repr::{Deserialize_repr, Serialize_repr};
 use std::collections::HashMap;
 use std::ops::Add;
-use serde_repr::{Deserialize_repr, Serialize_repr};
 
 mod error;
 
@@ -108,13 +108,6 @@ pub struct CreatePaymentDto {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-#[serde(rename_all = "camelCase")]
-pub struct GetByIdentityDto {
-    id: Option<String>,
-    alias: Option<String>,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
 #[serde(rename_all = "snake_case")]
 pub struct PaymentMethod {
     #[serde(rename = "type")]
@@ -154,13 +147,11 @@ impl InvoicePay {
         "https://api.invoice.su/api/v2"
     }
 
-    // Point of sale
-
-    async fn get_point_of_sale(
+    fn serialize_identity_dto(
         &self,
         id: Option<String>,
         alias: Option<String>,
-    ) -> Result<PointOfSale, Error> {
+    ) -> Result<String, Error> {
         let mut data: HashMap<&str, String> = HashMap::new();
 
         if id.is_some() {
@@ -173,11 +164,24 @@ impl InvoicePay {
             ));
         }
 
+        Ok(
+            serde_json::to_string(&data)
+                .map_err(|_| Error::new("Cannot serialize identity dto"))?,
+        )
+    }
+
+    // Point of sale
+
+    async fn get_point_of_sale(
+        &self,
+        id: Option<String>,
+        alias: Option<String>,
+    ) -> Result<PointOfSale, Error> {
         let req = self
             .client
             .post(format!("{}/GetPointOfSale", InvoicePay::get_base_url()))
             .header(AUTHORIZATION, format!("Basic {}", self.api_key))
-            .body(serde_json::to_string(&data).unwrap());
+            .body(self.serialize_identity_dto(id, alias)?);
 
         let res = req
             .send()
@@ -225,23 +229,11 @@ impl InvoicePay {
         id: Option<String>,
         alias: Option<String>,
     ) -> Result<Terminal, Error> {
-        let mut data: HashMap<&str, String> = HashMap::new();
-
-        if id.is_some() {
-            data.insert("id", id.unwrap());
-        } else if alias.is_some() {
-            data.insert("alias", alias.unwrap());
-        } else {
-            return Err(Error::new(
-                "At least one of the id or alias parameters must be",
-            ));
-        }
-
         let req = self
             .client
             .post(format!("{}/GetTerminal", InvoicePay::get_base_url()))
             .header(AUTHORIZATION, format!("Basic {}", self.api_key))
-            .json(&data);
+            .body(self.serialize_identity_dto(id, alias)?);
 
         let res = req
             .send()
@@ -278,16 +270,11 @@ impl InvoicePay {
     // Payment
 
     async fn get_payment(&self, id: String) -> Result<PaymentResponseDto, Error> {
-        let data = GetByIdentityDto {
-            id: Some(id),
-            alias: None,
-        };
-
         let req = self
             .client
             .post(format!("{}/GetPayment", InvoicePay::get_base_url()))
             .header(AUTHORIZATION, format!("Basic {}", self.api_key))
-            .json(&data);
+            .body(self.serialize_identity_dto(Some(id), None)?);
 
         let res = req
             .send()
@@ -310,8 +297,6 @@ impl InvoicePay {
             .header(AUTHORIZATION, format!("Basic {}", self.api_key))
             .body(serde_json::to_string(&payment_dto).unwrap());
 
-        println!("{:?}", payment_dto);
-
         let res = req
             .send()
             .await
@@ -319,11 +304,30 @@ impl InvoicePay {
             .text()
             .await
             .map_err(|_| Error::new("Cannot convert response from /CreatePayment"))?;
-        
-        println!("{}", res);
 
         let res = serde_json::from_str(&res)
             .map_err(|_| Error::new("Cannot parse response from /CreatePayment"))?;
+
+        Ok(res)
+    }
+
+    async fn cancel_payment(&self, id: String) -> Result<PaymentResponseDto, Error> {
+        let req = self
+            .client
+            .post(format!("{}/ClosePayment", InvoicePay::get_base_url()))
+            .header(AUTHORIZATION, format!("Basic {}", self.api_key))
+            .body(self.serialize_identity_dto(Some(id), None)?);
+
+        let res = req
+            .send()
+            .await
+            .map_err(|_| Error::new("Cannot send request to /ClosePayment"))?
+            .text()
+            .await
+            .map_err(|_| Error::new("Cannot convert response from /ClosePayment"))?;
+
+        let res = serde_json::from_str(&res)
+            .map_err(|_| Error::new("Cannot parse response from /ClosePayment"))?;
 
         Ok(res)
     }
@@ -418,8 +422,6 @@ mod tests {
         if terminal.id.is_none() {
             panic!("id is missing, but it is required after getting terminal by id");
         }
-        
-        println!("terminal_id: {}", terminal.id.clone().unwrap());
 
         let create_payment_dto = CreatePaymentDto {
             order: Order {
@@ -448,11 +450,21 @@ mod tests {
             transaction_type: CreatePaymentDtoTransactionType::Once,
         };
 
-        let payment_response = invoice_pay
+        let mut payment_response = invoice_pay
             .create_payment(create_payment_dto)
             .await
             .unwrap();
 
-        invoice_pay.get_payment(payment_response.id).await.unwrap();
+        payment_response = invoice_pay.get_payment(payment_response.id).await.unwrap();
+        
+        if payment_response.status != String::from("init") {
+            panic!("payment status is invalid: {}", payment_response.status);
+        }
+        
+        payment_response = invoice_pay.cancel_payment(payment_response.id).await.unwrap();
+
+        if payment_response.status != String::from("closed") {
+            panic!("payment status is invalid: {}", payment_response.status);
+        }
     }
 }
