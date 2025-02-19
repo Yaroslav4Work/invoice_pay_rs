@@ -1,335 +1,391 @@
-use crate::error::Error;
-use base64::{engine::general_purpose::STANDARD, Engine};
 use reqwest::header::AUTHORIZATION;
 use reqwest::Client;
-use serde::{Deserialize, Serialize};
-use serde_repr::{Deserialize_repr, Serialize_repr};
 use std::collections::HashMap;
-use std::ops::Add;
 
 mod error;
+use crate::error::Error;
+pub mod serializable;
+use crate::serializable::*;
 
-#[derive(Serialize, Deserialize, Debug)]
-#[serde(rename_all = "lowercase")]
-pub enum PointType {
-    Offline,
-    Online,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-#[serde(rename_all = "camelCase")]
-pub struct PointOfSale {
-    pub id: Option<String>,
-    pub name: String,
-    pub address: String,
-    pub alias: String,
-    pub mail: String,
-    pub phone: String,
-    #[serde(rename = "type")]
-    pub point_type: PointType,
-    pub website: String,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-#[serde(rename_all = "lowercase")]
-pub enum TerminalType {
-    Dynamical,
-    Statical,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-#[serde(rename_all = "camelCase")]
-pub struct Terminal {
-    pub id: Option<String>,
-    pub link: Option<String>,
-    pub name: String,
-    pub alias: Option<String>,
-    pub description: String,
-    #[serde(rename = "type")]
-    pub terminal_type: TerminalType,
-    pub default_price: f32,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-#[serde(rename_all = "UPPERCASE")]
-pub enum Currency {
-    RUB,
-    EUR,
-    USD,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-#[serde(rename_all = "camelCase")]
-pub struct Order {
-    pub id: String,
-    pub currency: Currency,
-    pub amount: f32,
-    pub description: String,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-#[serde(rename_all = "camelCase")]
-pub struct CreatePaymentDtoReceipt {
-    pub name: String,
-    pub price: f32,
-    pub discount: f32,
-    pub result_price: f32,
-    pub quantity: u32,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-#[serde(rename_all = "snake_case")]
-pub struct CreatePaymentDtoSettings {
-    pub terminal_id: String,
-    pub success_url: String,
-    pub fail_url: String,
-    pub recur_exp: Option<String>,
-    pub recur_freq: Option<String>,
-}
-
-#[derive(Serialize_repr, Deserialize_repr, Debug)]
-#[repr(u8)]
-pub enum CreatePaymentDtoTransactionType {
-    Once = 1,
-    Recurrent = 4,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-#[serde(rename_all = "camelCase")]
-pub struct CreatePaymentDto {
-    pub order: Order,
-    pub settings: CreatePaymentDtoSettings,
-    pub custom_parameters: Option<HashMap<String, String>>,
-    pub receipt: Vec<CreatePaymentDtoReceipt>,
-    pub phone: Option<String>,
-    pub mail: Option<String>,
-    #[serde(rename = "trtype")]
-    pub transaction_type: CreatePaymentDtoTransactionType,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-#[serde(rename_all = "snake_case")]
-pub struct PaymentMethod {
-    #[serde(rename = "type")]
-    payment_method_type: Option<String>,
-    terminal_id: String,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-#[serde(rename_all = "snake_case")]
-pub struct PaymentResponseDto {
-    pub id: String,
-    pub order: Order,
-    pub status: String,
-    pub status_description: String,
-    pub payment_method: PaymentMethod,
-    pub custom_parameters: Option<HashMap<String, String>>,
-    pub create_date: String,
-    pub update_date: Option<String>,
-    pub expire_date: Option<String>,
-    pub payment_url: String,
-}
-
-pub struct InvoicePay {
-    api_key: String,
+pub struct InvoicePay<'a> {
+    api_key: &'a str,
     client: Client,
 }
 
-impl InvoicePay {
-    fn new(login: String, api_key: String) -> InvoicePay {
+const BASE_URL: &str = "https://api.invoice.su/api/v2";
+
+impl InvoicePay<'_> {
+    pub fn new(api_key: &str) -> InvoicePay<'_> {
         InvoicePay {
-            api_key: STANDARD.encode(login.add(":").add(&api_key)),
+            api_key,
             client: Client::new(),
         }
-    }
-
-    fn get_base_url() -> &'static str {
-        "https://api.invoice.su/api/v2"
     }
 
     fn serialize_identity_dto(
         &self,
         id: Option<String>,
         alias: Option<String>,
+        route: String,
     ) -> Result<String, Error> {
         let mut data: HashMap<&str, String> = HashMap::new();
 
-        if id.is_some() {
-            data.insert("id", id.unwrap());
-        } else if alias.is_some() {
-            data.insert("alias", alias.unwrap());
+        if let Some(id) = id {
+            data.insert("id", id);
+        } else if let Some(alias) = alias {
+            data.insert("alias", alias);
         } else {
-            return Err(Error::new(
-                "At least one of the id or alias parameters must be",
-            ));
+            return Err(Error::ValidationOneOfTheFieldsError {
+                route,
+                fields: vec!["id".to_string(), "alias".to_string()],
+            });
         }
 
         Ok(
-            serde_json::to_string(&data)
-                .map_err(|_| Error::new("Cannot serialize identity dto"))?,
+            serde_json::to_string(&data).map_err(|e| Error::RequestJsonSerializationError {
+                route,
+                from: "HashMap<&str, String>".to_string(),
+                msg: e.to_string(),
+            })?,
         )
     }
 
     // Point of sale
 
-    async fn get_point_of_sale(
+    pub async fn get_point_of_sale(
         &self,
         id: Option<String>,
         alias: Option<String>,
     ) -> Result<PointOfSale, Error> {
         let req = self
             .client
-            .post(format!("{}/GetPointOfSale", InvoicePay::get_base_url()))
+            .post(format!("{}/GetPointOfSale", BASE_URL))
             .header(AUTHORIZATION, format!("Basic {}", self.api_key))
-            .body(self.serialize_identity_dto(id, alias)?);
+            .body(self.serialize_identity_dto(id, alias, "/GetPointOfSale".to_string())?);
 
         let res = req
             .send()
             .await
-            .map_err(|_| Error::new("Cannot send request to /GetPointOfSale"))?
+            .map_err(|e| Error::RequestSendingError {
+                route: "/GetPointOfSale".to_string(),
+                msg: e.to_string(),
+            })?
             .text()
             .await
-            .map_err(|_| Error::new("Cannot convert response from /GetPointOfSale"))?;
+            .map_err(|e| Error::ConversationError {
+                route: "/GetPointOfSale".to_string(),
+                from: "Response<&str>".to_string(),
+                to: "UTF-8 &str".to_string(),
+                msg: e.to_string(),
+            })?;
 
-        let res = serde_json::from_str(&res).map_err(|e| {
-            Error::new(&format!(
-                "Cannot parse response from /GetPointOfSale: {}",
-                e
-            ))
-        })?;
+        let deserialized_res =
+            serde_json::from_str(&res).map_err(|e| Error::ResponseJsonDeserializationError {
+                route: "/GetPointOfSale".to_string(),
+                to: "PointOfSale".to_string(),
+                msg: e.to_string(),
+            });
 
-        Ok(res)
+        if deserialized_res.is_err() {
+            return match serde_json::from_str::<ApiErrorResponse>(&res) {
+                Ok(api_err) => Err(Error::ApiError {
+                    route: "/GetPointOfSale".to_string(),
+                    code: api_err.error,
+                    msg: api_err.description,
+                }),
+                Err(_) => deserialized_res,
+            };
+        }
+
+        Ok(deserialized_res?)
     }
 
-    async fn create_point_of_sale(&self, point_of_sale: PointOfSale) -> Result<PointOfSale, Error> {
+    pub async fn create_point_of_sale(&self, point_of_sale: PointOfSale) -> Result<PointOfSale, Error> {
         let req = self
             .client
-            .post(format!("{}/CreatePointOfSale", InvoicePay::get_base_url()))
+            .post(format!("{}/CreatePointOfSale", BASE_URL))
             .header(AUTHORIZATION, format!("Basic {}", self.api_key))
             .json(&point_of_sale);
 
         let res = req
             .send()
             .await
-            .map_err(|_| Error::new("Cannot send request to /CreatePointOfSale"))?
+            .map_err(|e| Error::RequestSendingError {
+                route: "/CreatePointOfSale".to_string(),
+                msg: e.to_string(),
+            })?
             .text()
             .await
-            .map_err(|_| Error::new("Cannot convert Response String to UTF-8 &str"))?;
+            .map_err(|e| Error::ConversationError {
+                route: "/CreatePointOfSale".to_string(),
+                from: "Response<&str>".to_string(),
+                to: "UTF-8 &str".to_string(),
+                msg: e.to_string(),
+            })?;
 
-        let res = serde_json::from_str::<PointOfSale>(&res)
-            .map_err(|_| Error::new("Cannot parse response from response"))?;
+        let deserialized_res = serde_json::from_str::<PointOfSale>(&res).map_err(|e| {
+            Error::ResponseJsonDeserializationError {
+                route: "/CreatePointOfSale".to_string(),
+                to: "PointOfSale".to_string(),
+                msg: e.to_string(),
+            }
+        });
 
-        Ok(res)
+        if deserialized_res.is_err() {
+            return match serde_json::from_str::<ApiErrorResponse>(&res) {
+                Ok(api_err) => Err(Error::ApiError {
+                    route: "/CreatePointOfSale".to_string(),
+                    code: api_err.error,
+                    msg: api_err.description,
+                }),
+                Err(_) => deserialized_res,
+            };
+        }
+
+        Ok(deserialized_res?)
     }
 
     // Terminal
 
-    async fn get_terminal(
+    pub async fn get_terminal(
         &self,
         id: Option<String>,
         alias: Option<String>,
     ) -> Result<Terminal, Error> {
         let req = self
             .client
-            .post(format!("{}/GetTerminal", InvoicePay::get_base_url()))
+            .post(format!("{}/GetTerminal", BASE_URL))
             .header(AUTHORIZATION, format!("Basic {}", self.api_key))
-            .body(self.serialize_identity_dto(id, alias)?);
+            .body(self.serialize_identity_dto(id, alias, "/GetTerminal".to_string())?);
 
         let res = req
             .send()
             .await
-            .map_err(|_| Error::new("Cannot send request to /GetTerminal"))?
-            .json::<Terminal>()
-            .await
-            .map_err(|_| Error::new("Cannot parse response from /GetTerminal"))?;
-
-        Ok(res)
-    }
-
-    async fn create_terminal(&self, terminal: Terminal) -> Result<Terminal, Error> {
-        let req = self
-            .client
-            .post(format!("{}/CreateTerminal", InvoicePay::get_base_url()))
-            .header(AUTHORIZATION, format!("Basic {}", self.api_key))
-            .body(serde_json::to_string(&terminal).unwrap());
-
-        let res = req
-            .send()
-            .await
-            .map_err(|_| Error::new("Cannot send request to /CreateTerminal"))?
+            .map_err(|e| Error::RequestSendingError {
+                route: "/GetTerminal".to_string(),
+                msg: e.to_string(),
+            })?
             .text()
             .await
-            .map_err(|_| Error::new("Cannot parse response from /CreateTerminal"))?;
+            .map_err(|e| Error::ConversationError {
+                route: "/GetTerminal".to_string(),
+                from: "Response<&str>".to_string(),
+                to: "UTF-8 &str".to_string(),
+                msg: e.to_string(),
+            })?;
 
-        let res = serde_json::from_str(&res)
-            .map_err(|_| Error::new("Cannot parse response from /CreateTerminal"))?;
+        let deserialized_res =
+            serde_json::from_str(&res).map_err(|e| Error::ResponseJsonDeserializationError {
+                route: "/GetTerminal".to_string(),
+                to: "Terminal".to_string(),
+                msg: e.to_string(),
+            });
 
-        Ok(res)
+        if deserialized_res.is_err() {
+            return match serde_json::from_str::<ApiErrorResponse>(&res) {
+                Ok(api_err) => Err(Error::ApiError {
+                    route: "/GetTerminal".to_string(),
+                    code: api_err.error,
+                    msg: api_err.description,
+                }),
+                Err(_) => deserialized_res,
+            };
+        }
+
+        Ok(deserialized_res?)
+    }
+
+    pub async fn create_terminal(&self, terminal: Terminal) -> Result<Terminal, Error> {
+        let req = self
+            .client
+            .post(format!("{}/CreateTerminal", BASE_URL))
+            .header(AUTHORIZATION, format!("Basic {}", self.api_key))
+            .body(serde_json::to_string(&terminal).map_err(|e| {
+                Error::RequestJsonSerializationError {
+                    route: "/CreateTerminal".to_string(),
+                    from: "Terminal".to_string(),
+                    msg: e.to_string(),
+                }
+            })?);
+
+        let res = req
+            .send()
+            .await
+            .map_err(|e| Error::RequestSendingError {
+                route: "/CreateTerminal".to_string(),
+                msg: e.to_string(),
+            })?
+            .text()
+            .await
+            .map_err(|e| Error::ConversationError {
+                route: "/CreateTerminal".to_string(),
+                from: "Response<&str>".to_string(),
+                to: "UTF-8 &str".to_string(),
+                msg: e.to_string(),
+            })?;
+
+        let deserialized_res =
+            serde_json::from_str(&res).map_err(|e| Error::ResponseJsonDeserializationError {
+                route: "/CreateTerminal".to_string(),
+                to: "Terminal".to_string(),
+                msg: e.to_string(),
+            });
+
+        if deserialized_res.is_err() {
+            return match serde_json::from_str::<ApiErrorResponse>(&res) {
+                Ok(api_err) => Err(Error::ApiError {
+                    route: "/CreateTerminal".to_string(),
+                    code: api_err.error,
+                    msg: api_err.description,
+                }),
+                Err(_) => deserialized_res,
+            };
+        }
+
+        Ok(deserialized_res?)
     }
 
     // Payment
 
-    async fn get_payment(&self, id: String) -> Result<PaymentResponseDto, Error> {
+    pub async fn get_payment(&self, id: String) -> Result<PaymentResponseDto, Error> {
         let req = self
             .client
-            .post(format!("{}/GetPayment", InvoicePay::get_base_url()))
+            .post(format!("{}/GetPayment", BASE_URL))
             .header(AUTHORIZATION, format!("Basic {}", self.api_key))
-            .body(self.serialize_identity_dto(Some(id), None)?);
+            .body(self.serialize_identity_dto(Some(id), None, "/GetPayment".to_string())?);
 
         let res = req
             .send()
             .await
-            .map_err(|_| Error::new("Cannot send request to /GetPayment"))?
-            .json::<PaymentResponseDto>()
+            .map_err(|e| Error::RequestSendingError {
+                route: "/GetPayment".to_string(),
+                msg: e.to_string(),
+            })?
+            .text()
             .await
-            .map_err(|_| Error::new("Cannot parse response from /GetPayment"))?;
+            .map_err(|e| Error::ConversationError {
+                route: "/GetPayment".to_string(),
+                from: "Response<&str>".to_string(),
+                to: "UTF-8 &str".to_string(),
+                msg: e.to_string(),
+            })?;
 
-        Ok(res)
+        let deserialized_res =
+            serde_json::from_str(&res).map_err(|e| Error::ResponseJsonDeserializationError {
+                route: "/GetPayment".to_string(),
+                to: "PaymentResponseDto".to_string(),
+                msg: e.to_string(),
+            });
+
+        if deserialized_res.is_err() {
+            return match serde_json::from_str::<ApiErrorResponse>(&res) {
+                Ok(api_err) => Err(Error::ApiError {
+                    route: "/GetPayment".to_string(),
+                    code: api_err.error,
+                    msg: api_err.description,
+                }),
+                Err(_) => deserialized_res,
+            };
+        }
+
+        Ok(deserialized_res?)
     }
 
-    async fn create_payment(
+    pub async fn create_payment(
         &self,
         payment_dto: CreatePaymentDto,
     ) -> Result<PaymentResponseDto, Error> {
         let req = self
             .client
-            .post(format!("{}/CreatePayment", InvoicePay::get_base_url()))
+            .post(format!("{}/CreatePayment", BASE_URL))
             .header(AUTHORIZATION, format!("Basic {}", self.api_key))
-            .body(serde_json::to_string(&payment_dto).unwrap());
+            .body(serde_json::to_string(&payment_dto).map_err(|e| {
+                Error::RequestJsonSerializationError {
+                    route: "/CreatePayment".to_string(),
+                    from: "CreatePaymentDto".to_string(),
+                    msg: e.to_string(),
+                }
+            })?);
 
         let res = req
             .send()
             .await
-            .map_err(|_| Error::new("Cannot send request to /CreatePayment"))?
+            .map_err(|e| Error::RequestSendingError {
+                route: "/CreatePayment".to_string(),
+                msg: e.to_string(),
+            })?
             .text()
             .await
-            .map_err(|_| Error::new("Cannot convert response from /CreatePayment"))?;
+            .map_err(|e| Error::ConversationError {
+                route: "/CreatePayment".to_string(),
+                from: "Response<&str>".to_string(),
+                to: "UTF-8 &str".to_string(),
+                msg: e.to_string(),
+            })?;
 
-        let res = serde_json::from_str(&res)
-            .map_err(|_| Error::new("Cannot parse response from /CreatePayment"))?;
+        let deserialized_res =
+            serde_json::from_str(&res).map_err(|e| Error::ResponseJsonDeserializationError {
+                route: "/CreatePayment".to_string(),
+                to: "PaymentResponseDto".to_string(),
+                msg: e.to_string(),
+            });
 
-        Ok(res)
+        if deserialized_res.is_err() {
+            return match serde_json::from_str::<ApiErrorResponse>(&res) {
+                Ok(api_err) => Err(Error::ApiError {
+                    route: "/CreatePayment".to_string(),
+                    code: api_err.error,
+                    msg: api_err.description,
+                }),
+                Err(_) => deserialized_res,
+            };
+        }
+
+        Ok(deserialized_res?)
     }
 
-    async fn cancel_payment(&self, id: String) -> Result<PaymentResponseDto, Error> {
+    pub async fn cancel_payment(&self, id: String) -> Result<PaymentResponseDto, Error> {
         let req = self
             .client
-            .post(format!("{}/ClosePayment", InvoicePay::get_base_url()))
+            .post(format!("{}/ClosePayment", BASE_URL))
             .header(AUTHORIZATION, format!("Basic {}", self.api_key))
-            .body(self.serialize_identity_dto(Some(id), None)?);
+            .body(self.serialize_identity_dto(Some(id), None, "/ClosePayment".to_string())?);
 
         let res = req
             .send()
             .await
-            .map_err(|_| Error::new("Cannot send request to /ClosePayment"))?
+            .map_err(|e| Error::RequestSendingError {
+                route: "/ClosePayment".to_string(),
+                msg: e.to_string(),
+            })?
             .text()
             .await
-            .map_err(|_| Error::new("Cannot convert response from /ClosePayment"))?;
+            .map_err(|e| Error::ConversationError {
+                route: "/ClosePayment".to_string(),
+                from: "Response<&str>".to_string(),
+                to: "UTF-8 &str".to_string(),
+                msg: e.to_string(),
+            })?;
 
-        let res = serde_json::from_str(&res)
-            .map_err(|_| Error::new("Cannot parse response from /ClosePayment"))?;
+        let deserialized_res =
+            serde_json::from_str(&res).map_err(|e| Error::ResponseJsonDeserializationError {
+                route: "/ClosePayment".to_string(),
+                to: "PaymentResponseDto".to_string(),
+                msg: e.to_string(),
+            });
 
-        Ok(res)
+        if deserialized_res.is_err() {
+            return match serde_json::from_str::<ApiErrorResponse>(&res) {
+                Ok(api_err) => Err(Error::ApiError {
+                    route: "/ClosePayment".to_string(),
+                    code: api_err.error,
+                    msg: api_err.description,
+                }),
+                Err(_) => deserialized_res,
+            };
+        }
+
+        Ok(deserialized_res?)
     }
 }
 
@@ -339,10 +395,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_all() {
-        let invoice_pay = InvoicePay::new(
-            "demo".to_string(),
-            "1526fec01b5d11f4df4f2160627ce351".to_string(),
-        );
+        let invoice_pay = InvoicePay::new("ZGVtbzoxNTI2ZmVjMDFiNWQxMWY0ZGY0ZjIxNjA2MjdjZTM1MQ==");
 
         let test_identity = format!(
             "TEST_BLACK_CAT_VPN_{:?}",
@@ -359,7 +412,7 @@ mod tests {
             mail: "example@gmail.com".to_string(),
             phone: "89211239923".to_string(),
             point_type: PointType::Online,
-            website: "http://blackcatvpn.com".to_string(),
+            website: "https://blackcatvpn.com".to_string(),
         };
 
         point_of_sale = invoice_pay
@@ -456,12 +509,15 @@ mod tests {
             .unwrap();
 
         payment_response = invoice_pay.get_payment(payment_response.id).await.unwrap();
-        
+
         if payment_response.status != String::from("init") {
             panic!("payment status is invalid: {}", payment_response.status);
         }
-        
-        payment_response = invoice_pay.cancel_payment(payment_response.id).await.unwrap();
+
+        payment_response = invoice_pay
+            .cancel_payment(payment_response.id)
+            .await
+            .unwrap();
 
         if payment_response.status != String::from("closed") {
             panic!("payment status is invalid: {}", payment_response.status);
