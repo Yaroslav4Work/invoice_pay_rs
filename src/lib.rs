@@ -1,14 +1,16 @@
 use crate::error::Error;
+use base64::{engine::general_purpose::STANDARD, Engine};
 use reqwest::header::AUTHORIZATION;
 use reqwest::Client;
-use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::ops::Add;
+use serde_repr::{Deserialize_repr, Serialize_repr};
 
 mod error;
 
 #[derive(Serialize, Deserialize, Debug)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "lowercase")]
 pub enum PointType {
     Offline,
     Online,
@@ -29,7 +31,7 @@ pub struct PointOfSale {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "lowercase")]
 pub enum TerminalType {
     Dynamical,
     Statical,
@@ -41,16 +43,15 @@ pub struct Terminal {
     pub id: Option<String>,
     pub link: Option<String>,
     pub name: String,
-    pub alias: String,
+    pub alias: Option<String>,
     pub description: String,
     #[serde(rename = "type")]
     pub terminal_type: TerminalType,
     pub default_price: f32,
-    pub point_id: String,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "UPPERCASE")]
 pub enum Currency {
     RUB,
     EUR,
@@ -77,7 +78,7 @@ pub struct CreatePaymentDtoReceipt {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct CreatePaymentDtoSettings {
     pub terminal_id: String,
     pub success_url: String,
@@ -86,8 +87,8 @@ pub struct CreatePaymentDtoSettings {
     pub recur_freq: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-#[serde(rename_all = "camelCase")]
+#[derive(Serialize_repr, Deserialize_repr, Debug)]
+#[repr(u8)]
 pub enum CreatePaymentDtoTransactionType {
     Once = 1,
     Recurrent = 4,
@@ -142,9 +143,9 @@ pub struct InvoicePay {
 }
 
 impl InvoicePay {
-    fn new(api_key: String) -> InvoicePay {
+    fn new(login: String, api_key: String) -> InvoicePay {
         InvoicePay {
-            api_key,
+            api_key: STANDARD.encode(login.add(":").add(&api_key)),
             client: Client::new(),
         }
     }
@@ -160,27 +161,38 @@ impl InvoicePay {
         id: Option<String>,
         alias: Option<String>,
     ) -> Result<PointOfSale, Error> {
-        if id.is_none() && alias.is_none() {
+        let mut data: HashMap<&str, String> = HashMap::new();
+
+        if id.is_some() {
+            data.insert("id", id.unwrap());
+        } else if alias.is_some() {
+            data.insert("alias", alias.unwrap());
+        } else {
             return Err(Error::new(
                 "At least one of the id or alias parameters must be",
             ));
         }
 
-        let data = GetByIdentityDto { id, alias };
-
         let req = self
             .client
             .post(format!("{}/GetPointOfSale", InvoicePay::get_base_url()))
             .header(AUTHORIZATION, format!("Basic {}", self.api_key))
-            .json(&data);
+            .body(serde_json::to_string(&data).unwrap());
 
         let res = req
             .send()
             .await
             .map_err(|_| Error::new("Cannot send request to /GetPointOfSale"))?
-            .json::<PointOfSale>()
+            .text()
             .await
-            .map_err(|_| Error::new("Cannot parse response from /GetPointOfSale"))?;
+            .map_err(|_| Error::new("Cannot convert response from /GetPointOfSale"))?;
+
+        let res = serde_json::from_str(&res).map_err(|e| {
+            Error::new(&format!(
+                "Cannot parse response from /GetPointOfSale: {}",
+                e
+            ))
+        })?;
 
         Ok(res)
     }
@@ -196,9 +208,12 @@ impl InvoicePay {
             .send()
             .await
             .map_err(|_| Error::new("Cannot send request to /CreatePointOfSale"))?
-            .json::<PointOfSale>()
+            .text()
             .await
-            .map_err(|_| Error::new("Cannot parse response from /CreatePointOfSale"))?;
+            .map_err(|_| Error::new("Cannot convert Response String to UTF-8 &str"))?;
+
+        let res = serde_json::from_str::<PointOfSale>(&res)
+            .map_err(|_| Error::new("Cannot parse response from response"))?;
 
         Ok(res)
     }
@@ -210,13 +225,17 @@ impl InvoicePay {
         id: Option<String>,
         alias: Option<String>,
     ) -> Result<Terminal, Error> {
-        if id.is_none() && alias.is_none() {
+        let mut data: HashMap<&str, String> = HashMap::new();
+
+        if id.is_some() {
+            data.insert("id", id.unwrap());
+        } else if alias.is_some() {
+            data.insert("alias", alias.unwrap());
+        } else {
             return Err(Error::new(
                 "At least one of the id or alias parameters must be",
             ));
         }
-
-        let data = GetByIdentityDto { id, alias };
 
         let req = self
             .client
@@ -240,26 +259,29 @@ impl InvoicePay {
             .client
             .post(format!("{}/CreateTerminal", InvoicePay::get_base_url()))
             .header(AUTHORIZATION, format!("Basic {}", self.api_key))
-            .json(&terminal);
+            .body(serde_json::to_string(&terminal).unwrap());
 
         let res = req
             .send()
             .await
             .map_err(|_| Error::new("Cannot send request to /CreateTerminal"))?
-            .json::<Terminal>()
+            .text()
             .await
+            .map_err(|_| Error::new("Cannot parse response from /CreateTerminal"))?;
+
+        let res = serde_json::from_str(&res)
             .map_err(|_| Error::new("Cannot parse response from /CreateTerminal"))?;
 
         Ok(res)
     }
 
     // Payment
-    
-    async fn get_payment(
-        &self,
-        id: String,
-    ) -> Result<PaymentResponseDto, Error> {
-        let data = GetByIdentityDto { id: Some(id), alias: None };
+
+    async fn get_payment(&self, id: String) -> Result<PaymentResponseDto, Error> {
+        let data = GetByIdentityDto {
+            id: Some(id),
+            alias: None,
+        };
 
         let req = self
             .client
@@ -277,22 +299,160 @@ impl InvoicePay {
 
         Ok(res)
     }
-    
-    async fn create_payment(&self, payment_dto: CreatePaymentDto) -> Result<PaymentResponseDto, Error> {
+
+    async fn create_payment(
+        &self,
+        payment_dto: CreatePaymentDto,
+    ) -> Result<PaymentResponseDto, Error> {
         let req = self
             .client
             .post(format!("{}/CreatePayment", InvoicePay::get_base_url()))
             .header(AUTHORIZATION, format!("Basic {}", self.api_key))
-            .json(&payment_dto);
+            .body(serde_json::to_string(&payment_dto).unwrap());
+
+        println!("{:?}", payment_dto);
 
         let res = req
             .send()
             .await
             .map_err(|_| Error::new("Cannot send request to /CreatePayment"))?
-            .json::<PaymentResponseDto>()
+            .text()
             .await
+            .map_err(|_| Error::new("Cannot convert response from /CreatePayment"))?;
+        
+        println!("{}", res);
+
+        let res = serde_json::from_str(&res)
             .map_err(|_| Error::new("Cannot parse response from /CreatePayment"))?;
 
         Ok(res)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_all() {
+        let invoice_pay = InvoicePay::new(
+            "demo".to_string(),
+            "1526fec01b5d11f4df4f2160627ce351".to_string(),
+        );
+
+        let test_identity = format!(
+            "TEST_BLACK_CAT_VPN_{:?}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("Time went backwards")
+        );
+
+        let mut point_of_sale = PointOfSale {
+            id: None,
+            name: test_identity.clone(),
+            address: "test address".to_string(),
+            alias: test_identity.clone(),
+            mail: "example@gmail.com".to_string(),
+            phone: "89211239923".to_string(),
+            point_type: PointType::Online,
+            website: "http://blackcatvpn.com".to_string(),
+        };
+
+        point_of_sale = invoice_pay
+            .create_point_of_sale(point_of_sale)
+            .await
+            .unwrap();
+
+        if point_of_sale.id.is_none() {
+            panic!("id is missing, but it is required after creation point of sale");
+        }
+
+        point_of_sale = invoice_pay
+            .get_point_of_sale(None, Some(test_identity.clone()))
+            .await
+            .unwrap();
+
+        if point_of_sale.id.is_none() {
+            panic!("id is missing, but it is required after getting point of sale by alias");
+        }
+
+        point_of_sale = invoice_pay
+            .get_point_of_sale(Some(point_of_sale.id.unwrap()), None)
+            .await
+            .unwrap();
+
+        if point_of_sale.id.is_none() {
+            panic!("id is missing, but it is required after getting point of sale by id");
+        }
+
+        let mut terminal = Terminal {
+            id: None,
+            link: None,
+            name: test_identity.clone(),
+            alias: Some(test_identity.clone()),
+            description: "testing...".to_string(),
+            terminal_type: TerminalType::Dynamical,
+            default_price: 180.0,
+        };
+
+        terminal = invoice_pay.create_terminal(terminal).await.unwrap();
+
+        if terminal.id.is_none() {
+            panic!("id is missing, but it is required after creation terminal");
+        }
+
+        terminal = invoice_pay
+            .get_terminal(None, Some(test_identity.clone()))
+            .await
+            .unwrap();
+
+        if terminal.id.is_none() {
+            panic!("id is missing, but it is required after getting terminal by alias");
+        }
+
+        terminal = invoice_pay
+            .get_terminal(Some(terminal.id.unwrap()), None)
+            .await
+            .unwrap();
+
+        if terminal.id.is_none() {
+            panic!("id is missing, but it is required after getting terminal by id");
+        }
+        
+        println!("terminal_id: {}", terminal.id.clone().unwrap());
+
+        let create_payment_dto = CreatePaymentDto {
+            order: Order {
+                id: test_identity.clone(),
+                currency: Currency::RUB,
+                amount: 180.0,
+                description: "testing...".to_string(),
+            },
+            settings: CreatePaymentDtoSettings {
+                terminal_id: terminal.id.unwrap(),
+                success_url: "https://web.telegram.org/a/#7813325101".to_string(),
+                fail_url: "https://web.telegram.org/a/#7813325101".to_string(),
+                recur_exp: None,
+                recur_freq: None,
+            },
+            custom_parameters: None,
+            receipt: vec![CreatePaymentDtoReceipt {
+                name: "Test receipt".to_string(),
+                price: 180.0,
+                discount: 0.0,
+                result_price: 180.0,
+                quantity: 1,
+            }],
+            phone: None,
+            mail: None,
+            transaction_type: CreatePaymentDtoTransactionType::Once,
+        };
+
+        let payment_response = invoice_pay
+            .create_payment(create_payment_dto)
+            .await
+            .unwrap();
+
+        invoice_pay.get_payment(payment_response.id).await.unwrap();
     }
 }
