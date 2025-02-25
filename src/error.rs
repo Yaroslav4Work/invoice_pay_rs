@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fmt;
 use std::fmt::{Display, Formatter};
 
@@ -31,6 +32,12 @@ pub enum Error {
         route: String,
         code: u8,
         msg: String,
+    },
+    ApiValidationError {
+        route: String,
+        code: u8,
+        msg: String,
+        additions: HashMap<String, String>,
     },
 }
 
@@ -79,6 +86,18 @@ impl Display for Error {
                     f,
                     "Request to API {} was failed with code: {} - {}",
                     route, code, msg
+                )
+            }
+            Error::ApiValidationError {
+                route,
+                code,
+                msg,
+                additions,
+            } => {
+                write!(
+                    f,
+                    "Request to API {} was failed with code: {} - {}. Additions: {:?}",
+                    route, code, msg, additions
                 )
             }
         }
