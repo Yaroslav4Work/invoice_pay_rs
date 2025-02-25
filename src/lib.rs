@@ -92,15 +92,9 @@ impl InvoicePay<'_> {
                     route: "/GetPointOfSale".to_string(),
                     code: api_err.error,
                     msg: api_err.description,
+                    additions: api_err.additions,
                 }),
-                Err(_) => match serde_json::from_str::<ApiValidationErrorResponse>(&res) {
-                    Ok(api_err) => Err(Error::ApiError {
-                        route: "/GetPointOfSale".to_string(),
-                        code: api_err.error,
-                        msg: api_err.description,
-                    }),
-                    Err(_) => deserialized_res,
-                }
+                Err(_) => deserialized_res
             };
         }
 
@@ -144,15 +138,9 @@ impl InvoicePay<'_> {
                     route: "/CreatePointOfSale".to_string(),
                     code: api_err.error,
                     msg: api_err.description,
+                    additions: api_err.additions,
                 }),
-                Err(_) => match serde_json::from_str::<ApiValidationErrorResponse>(&res) {
-                    Ok(api_err) => Err(Error::ApiError {
-                        route: "/CreatePointOfSale".to_string(),
-                        code: api_err.error,
-                        msg: api_err.description,
-                    }),
-                    Err(_) => deserialized_res,
-                }
+                Err(_) => deserialized_res
             };
         }
 
@@ -201,15 +189,9 @@ impl InvoicePay<'_> {
                     route: "/GetTerminal".to_string(),
                     code: api_err.error,
                     msg: api_err.description,
+                    additions: api_err.additions,
                 }),
-                Err(_) => match serde_json::from_str::<ApiValidationErrorResponse>(&res) {
-                    Ok(api_err) => Err(Error::ApiError {
-                        route: "/GetTerminal".to_string(),
-                        code: api_err.error,
-                        msg: api_err.description,
-                    }),
-                    Err(_) => deserialized_res,
-                }
+                Err(_) => deserialized_res
             };
         }
 
@@ -258,15 +240,9 @@ impl InvoicePay<'_> {
                     route: "/CreateTerminal".to_string(),
                     code: api_err.error,
                     msg: api_err.description,
+                    additions: api_err.additions,
                 }),
-                Err(_) => match serde_json::from_str::<ApiValidationErrorResponse>(&res) {
-                    Ok(api_err) => Err(Error::ApiError {
-                        route: "/CreateTerminal".to_string(),
-                        code: api_err.error,
-                        msg: api_err.description,
-                    }),
-                    Err(_) => deserialized_res,
-                }
+                Err(_) => deserialized_res
             };
         }
 
@@ -311,15 +287,9 @@ impl InvoicePay<'_> {
                     route: "/GetPayment".to_string(),
                     code: api_err.error,
                     msg: api_err.description,
+                    additions: api_err.additions,
                 }),
-                Err(_) => match serde_json::from_str::<ApiValidationErrorResponse>(&res) {
-                    Ok(api_err) => Err(Error::ApiError {
-                        route: "/GetPayment".to_string(),
-                        code: api_err.error,
-                        msg: api_err.description,
-                    }),
-                    Err(_) => deserialized_res,
-                }
+                Err(_) => deserialized_res
             };
         }
 
@@ -371,15 +341,9 @@ impl InvoicePay<'_> {
                     route: "/CreatePayment".to_string(),
                     code: api_err.error,
                     msg: api_err.description,
+                    additions: api_err.additions,
                 }),
-                Err(_) => match serde_json::from_str::<ApiValidationErrorResponse>(&res) {
-                    Ok(api_err) => Err(Error::ApiError {
-                        route: "/CreatePayment".to_string(),
-                        code: api_err.error,
-                        msg: api_err.description,
-                    }),
-                    Err(_) => deserialized_res,
-                }
+                Err(_) => deserialized_res
             };
         }
 
@@ -422,15 +386,9 @@ impl InvoicePay<'_> {
                     route: "/ClosePayment".to_string(),
                     code: api_err.error,
                     msg: api_err.description,
+                    additions: api_err.additions,
                 }),
-                Err(_) => match serde_json::from_str::<ApiValidationErrorResponse>(&res) {
-                    Ok(api_err) => Err(Error::ApiError {
-                        route: "/ClosePayment".to_string(),
-                        code: api_err.error,
-                        msg: api_err.description,
-                    }),
-                    Err(_) => deserialized_res,
-                }
+                Err(_) => deserialized_res
             };
         }
 

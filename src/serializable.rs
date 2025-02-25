@@ -126,14 +126,7 @@ pub struct PaymentResponseDto {
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct ApiErrorResponse {
-    pub error: u8,
+    pub error: u16,
     pub description: String,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-#[serde(rename_all = "camelCase")]
-pub struct ApiValidationErrorResponse {
-    pub error: u8,
-    pub description: String,
-    pub additions: HashMap<String, Vec<String>>,
+    pub additions: Option<HashMap<String, Vec<String>>>,
 }

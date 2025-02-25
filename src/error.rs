@@ -30,14 +30,9 @@ pub enum Error {
     },
     ApiError {
         route: String,
-        code: u8,
+        code: u16,
         msg: String,
-    },
-    ApiValidationError {
-        route: String,
-        code: u8,
-        msg: String,
-        additions: HashMap<String, String>,
+        additions: Option<HashMap<String, Vec<String>>>,
     },
 }
 
@@ -81,24 +76,25 @@ impl Display for Error {
                     to, route, msg
                 )
             }
-            Error::ApiError { route, code, msg } => {
-                write!(
-                    f,
-                    "Request to API {} was failed with code: {} - {}",
-                    route, code, msg
-                )
-            }
-            Error::ApiValidationError {
+            Error::ApiError {
                 route,
                 code,
                 msg,
                 additions,
             } => {
-                write!(
-                    f,
-                    "Request to API {} was failed with code: {} - {}. Additions: {:?}",
-                    route, code, msg, additions
-                )
+                if let Some(additions) = additions {
+                    write!(
+                        f,
+                        "Request to API {} was failed with code: {} - {}. Additions: {:?}",
+                        route, code, msg, additions
+                    )
+                } else {
+                    write!(
+                        f,
+                        "Request to API {} was failed with code: {} - {}",
+                        route, code, msg
+                    )
+                }
             }
         }
     }
