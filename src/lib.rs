@@ -7,15 +7,15 @@ use crate::error::Error;
 pub mod serializable;
 use crate::serializable::*;
 
-pub struct InvoicePay<'a> {
-    api_key: &'a str,
+pub struct InvoicePay {
+    api_key: String,
     client: Client,
 }
 
 const BASE_URL: &str = "https://api.invoice.su/api/v2";
 
-impl InvoicePay<'_> {
-    pub fn new(api_key: &str) -> InvoicePay<'_> {
+impl InvoicePay {
+    pub fn new(api_key: String) -> InvoicePay {
         InvoicePay {
             api_key,
             client: Client::new(),
@@ -94,14 +94,17 @@ impl InvoicePay<'_> {
                     msg: api_err.description,
                     additions: api_err.additions,
                 }),
-                Err(_) => deserialized_res
+                Err(_) => deserialized_res,
             };
         }
 
         Ok(deserialized_res?)
     }
 
-    pub async fn create_point_of_sale(&self, point_of_sale: PointOfSale) -> Result<PointOfSale, Error> {
+    pub async fn create_point_of_sale(
+        &self,
+        point_of_sale: PointOfSale,
+    ) -> Result<PointOfSale, Error> {
         let req = self
             .client
             .post(format!("{}/CreatePointOfSale", BASE_URL))
@@ -140,7 +143,7 @@ impl InvoicePay<'_> {
                     msg: api_err.description,
                     additions: api_err.additions,
                 }),
-                Err(_) => deserialized_res
+                Err(_) => deserialized_res,
             };
         }
 
@@ -191,7 +194,7 @@ impl InvoicePay<'_> {
                     msg: api_err.description,
                     additions: api_err.additions,
                 }),
-                Err(_) => deserialized_res
+                Err(_) => deserialized_res,
             };
         }
 
@@ -242,7 +245,7 @@ impl InvoicePay<'_> {
                     msg: api_err.description,
                     additions: api_err.additions,
                 }),
-                Err(_) => deserialized_res
+                Err(_) => deserialized_res,
             };
         }
 
@@ -289,7 +292,7 @@ impl InvoicePay<'_> {
                     msg: api_err.description,
                     additions: api_err.additions,
                 }),
-                Err(_) => deserialized_res
+                Err(_) => deserialized_res,
             };
         }
 
@@ -343,7 +346,7 @@ impl InvoicePay<'_> {
                     msg: api_err.description,
                     additions: api_err.additions,
                 }),
-                Err(_) => deserialized_res
+                Err(_) => deserialized_res,
             };
         }
 
@@ -388,7 +391,7 @@ impl InvoicePay<'_> {
                     msg: api_err.description,
                     additions: api_err.additions,
                 }),
-                Err(_) => deserialized_res
+                Err(_) => deserialized_res,
             };
         }
 
@@ -402,7 +405,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_all() {
-        let invoice_pay = InvoicePay::new("ZGVtbzoxNTI2ZmVjMDFiNWQxMWY0ZGY0ZjIxNjA2MjdjZTM1MQ==");
+        let invoice_pay =
+            InvoicePay::new("ZGVtbzoxNTI2ZmVjMDFiNWQxMWY0ZGY0ZjIxNjA2MjdjZTM1MQ==".to_string());
 
         let test_identity = format!(
             "TEST_BLACK_CAT_VPN_{:?}",
