@@ -299,6 +299,51 @@ impl InvoicePay {
         Ok(deserialized_res?)
     }
 
+    pub async fn get_payment_by_order(&self, id: String) -> Result<PaymentResponseDto, Error> {
+        let req = self
+            .client
+            .post(format!("{}/GetPaymentByOrder", BASE_URL))
+            .header(AUTHORIZATION, format!("Basic {}", self.api_key))
+            .body(self.serialize_identity_dto(Some(id), None, "/GetPaymentByOrder".to_string())?);
+
+        let res = req
+            .send()
+            .await
+            .map_err(|e| Error::RequestSendingError {
+                route: "/GetPaymentByOrder".to_string(),
+                msg: e.to_string(),
+            })?
+            .text()
+            .await
+            .map_err(|e| Error::ConversationError {
+                route: "/GetPaymentByOrder".to_string(),
+                from: "Response<&str>".to_string(),
+                to: "UTF-8 &str".to_string(),
+                msg: e.to_string(),
+            })?;
+
+        let deserialized_res =
+            serde_json::from_str(&res).map_err(|e| Error::ResponseJsonDeserializationError {
+                route: "/GetPaymentByOrder".to_string(),
+                to: "PaymentResponseDto".to_string(),
+                msg: e.to_string(),
+            });
+
+        if deserialized_res.is_err() {
+            return match serde_json::from_str::<ApiErrorResponse>(&res) {
+                Ok(api_err) => Err(Error::ApiError {
+                    route: "/GetPaymentByOrder".to_string(),
+                    code: api_err.error,
+                    msg: api_err.description,
+                    additions: api_err.additions,
+                }),
+                Err(_) => deserialized_res,
+            };
+        }
+
+        Ok(deserialized_res?)
+    }
+
     pub async fn create_payment(
         &self,
         payment_dto: CreatePaymentDto,
@@ -523,6 +568,12 @@ mod tests {
 
         if payment_response.status != String::from("init") {
             panic!("payment status is invalid: {}", payment_response.status);
+        }
+
+        let payment_response_by_order = invoice_pay.get_payment_by_order(test_identity.clone()).await.unwrap();
+
+        if payment_response_by_order.id != payment_response.id {
+            panic!("payment by order id is invalid: {} != {}", payment_response_by_order.status, payment_response.id);
         }
 
         payment_response = invoice_pay
