@@ -1,6 +1,6 @@
-use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
+use std::collections::HashMap;
 
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(rename_all = "lowercase")]
@@ -43,7 +43,7 @@ pub struct Terminal {
     pub default_price: f32,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "UPPERCASE")]
 pub enum Currency {
     RUB,
@@ -51,7 +51,7 @@ pub enum Currency {
     USD,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct Order {
     pub id: String,
@@ -60,9 +60,9 @@ pub struct Order {
     pub description: String,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
-pub struct CreatePaymentDtoReceipt {
+pub struct Receipt {
     pub name: String,
     pub price: f32,
     pub discount: f32,
@@ -70,7 +70,7 @@ pub struct CreatePaymentDtoReceipt {
     pub quantity: u32,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "snake_case")]
 pub struct CreatePaymentDtoSettings {
     pub terminal_id: String,
@@ -80,20 +80,20 @@ pub struct CreatePaymentDtoSettings {
     pub recur_freq: Option<String>,
 }
 
-#[derive(Serialize_repr, Deserialize_repr, Debug)]
+#[derive(Serialize_repr, Deserialize_repr, Debug, Clone)]
 #[repr(u8)]
 pub enum CreatePaymentDtoTransactionType {
     Once = 1,
     Recurrent = 4,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct CreatePaymentDto {
     pub order: Order,
     pub settings: CreatePaymentDtoSettings,
     pub custom_parameters: Option<HashMap<String, String>>,
-    pub receipt: Vec<CreatePaymentDtoReceipt>,
+    pub receipt: Vec<Receipt>,
     pub phone: Option<String>,
     pub mail: Option<String>,
     #[serde(rename = "trtype")]
@@ -121,6 +121,34 @@ pub struct PaymentResponseDto {
     pub update_date: Option<String>,
     pub expire_date: Option<String>,
     pub payment_url: String,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct Refund {
+    pub amount: f32,
+    pub reason: String,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateRefundDto {
+    pub id: String,
+    pub refund: Refund,
+    pub receipt: Vec<Receipt>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(rename_all = "snake_case")]
+pub struct RefundResponseDto {
+    pub id: String,
+    pub order: Order,
+    pub refund: Refund,
+    pub payment_id: String,
+    pub payment_method: PaymentMethod,
+    pub date_insert: Option<String>,
+    pub date_update: Option<String>,
+    pub status: String,
 }
 
 #[derive(Serialize, Deserialize, Debug)]

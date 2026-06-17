@@ -442,6 +442,105 @@ impl InvoicePay {
 
         Ok(deserialized_res?)
     }
+
+    pub async fn create_refund(
+        &self,
+        payment_dto: CreateRefundDto,
+    ) -> Result<RefundResponseDto, Error> {
+        let req = self
+            .client
+            .post(format!("{}/CreateRefund", BASE_URL))
+            .header(AUTHORIZATION, format!("Basic {}", self.api_key))
+            .body(serde_json::to_string(&payment_dto).map_err(|e| {
+                Error::RequestJsonSerializationError {
+                    route: "/CreateRefund".to_string(),
+                    from: "CreateRefundDto".to_string(),
+                    msg: e.to_string(),
+                }
+            })?);
+
+        let res = req
+            .send()
+            .await
+            .map_err(|e| Error::RequestSendingError {
+                route: "/CreateRefund".to_string(),
+                msg: e.to_string(),
+            })?
+            .text()
+            .await
+            .map_err(|e| Error::ConversationError {
+                route: "/CreateRefund".to_string(),
+                from: "Response<&str>".to_string(),
+                to: "UTF-8 &str".to_string(),
+                msg: e.to_string(),
+            })?;
+
+        let deserialized_res =
+            serde_json::from_str(&res).map_err(|e| Error::ResponseJsonDeserializationError {
+                route: "/CreateRefund".to_string(),
+                to: "RefundResponseDto".to_string(),
+                msg: e.to_string(),
+            });
+
+        if deserialized_res.is_err() {
+            return match serde_json::from_str::<ApiErrorResponse>(&res) {
+                Ok(api_err) => Err(Error::ApiError {
+                    route: "/CreateRefund".to_string(),
+                    code: api_err.error,
+                    msg: api_err.description,
+                    additions: api_err.additions,
+                }),
+                Err(_) => deserialized_res,
+            };
+        }
+
+        Ok(deserialized_res?)
+    }
+
+    pub async fn get_refund(&self, id: String) -> Result<RefundResponseDto, Error> {
+        let req = self
+            .client
+            .post(format!("{}/GetRefund", BASE_URL))
+            .header(AUTHORIZATION, format!("Basic {}", self.api_key))
+            .body(self.serialize_identity_dto(Some(id), None, "/GetRefund".to_string())?);
+
+        let res = req
+            .send()
+            .await
+            .map_err(|e| Error::RequestSendingError {
+                route: "/GetRefund".to_string(),
+                msg: e.to_string(),
+            })?
+            .text()
+            .await
+            .map_err(|e| Error::ConversationError {
+                route: "/GetRefund".to_string(),
+                from: "Response<&str>".to_string(),
+                to: "UTF-8 &str".to_string(),
+                msg: e.to_string(),
+            })?;
+
+        let deserialized_res =
+            serde_json::from_str(&res).map_err(|e| Error::ResponseJsonDeserializationError {
+                route: "/GetRefund".to_string(),
+                to: "RefundResponseDto".to_string(),
+                msg: e.to_string(),
+            });
+
+        if deserialized_res.is_err() {
+            return match serde_json::from_str::<ApiErrorResponse>(&res) {
+                Ok(api_err) => Err(Error::ApiError {
+                    route: "/GetRefund".to_string(),
+                    code: api_err.error,
+                    msg: api_err.description,
+                    additions: api_err.additions,
+                }),
+                Err(_) => deserialized_res,
+            };
+        }
+
+        Ok(deserialized_res?)
+    }
 }
 
 #[cfg(test)]
@@ -454,7 +553,7 @@ mod tests {
             InvoicePay::new("ZGVtbzoxNTI2ZmVjMDFiNWQxMWY0ZGY0ZjIxNjA2MjdjZTM1MQ==".to_string());
 
         let test_identity = format!(
-            "TEST_BLACK_CAT_VPN_{:?}",
+            "TEST_BCH_{:?}",
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .expect("Time went backwards")
@@ -468,7 +567,7 @@ mod tests {
             mail: "example@gmail.com".to_string(),
             phone: "89211239923".to_string(),
             point_type: PointType::Online,
-            website: "https://blackcatvpn.com".to_string(),
+            website: "https://blackcathosting.com".to_string(),
         };
 
         point_of_sale = invoice_pay
@@ -532,13 +631,17 @@ mod tests {
             panic!("id is missing, but it is required after getting terminal by id");
         }
 
+        let order_id = format!("{}:1", &test_identity);
+
+        let order = Order {
+            id: order_id.clone(),
+            currency: Currency::RUB,
+            amount: 180.0,
+            description: "testing...".to_string(),
+        };
+
         let create_payment_dto = CreatePaymentDto {
-            order: Order {
-                id: test_identity.clone(),
-                currency: Currency::RUB,
-                amount: 180.0,
-                description: "testing...".to_string(),
-            },
+            order: order.clone(),
             settings: CreatePaymentDtoSettings {
                 terminal_id: terminal.id.unwrap(),
                 success_url: "https://web.telegram.org/a/#7813325101".to_string(),
@@ -547,7 +650,7 @@ mod tests {
                 recur_freq: None,
             },
             custom_parameters: None,
-            receipt: vec![CreatePaymentDtoReceipt {
+            receipt: vec![Receipt {
                 name: "Test receipt".to_string(),
                 price: 180.0,
                 discount: 0.0,
@@ -560,7 +663,7 @@ mod tests {
         };
 
         let mut payment_response = invoice_pay
-            .create_payment(create_payment_dto)
+            .create_payment(create_payment_dto.clone())
             .await
             .unwrap();
 
@@ -570,10 +673,13 @@ mod tests {
             panic!("payment status is invalid: {}", payment_response.status);
         }
 
-        let payment_response_by_order = invoice_pay.get_payment_by_order(test_identity.clone()).await.unwrap();
+        let payment_response_by_order = invoice_pay.get_payment_by_order(order_id).await.unwrap();
 
         if payment_response_by_order.id != payment_response.id {
-            panic!("payment by order id is invalid: {} != {}", payment_response_by_order.status, payment_response.id);
+            panic!(
+                "payment by order id is invalid: {} != {}",
+                payment_response_by_order.status, payment_response.id
+            );
         }
 
         payment_response = invoice_pay
